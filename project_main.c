@@ -19,6 +19,8 @@
 #include <ti/drivers/Power.h>
 #include <ti/drivers/power/PowerCC26XX.h>
 #include <ti/drivers/UART.h>
+#include <ti/drivers/PIN.h>
+#include <ti/drivers/pin/PINCC26XX.h>
 
 /* Board Header files */
 #include "Board.h"
@@ -38,7 +40,7 @@ enum state programState = WAITING;
 // JTKJ: Exercise 3. Global variable for ambient light
 
 
-char viesti[30] = "";
+char viesti[30];
 
 // JTKJ: Teht�v� 1. Lis�� painonappien RTOS-muuttujat ja alustus
 // JTKJ: Exercise 1. Add pins RTOS-variables and configuration here
@@ -46,6 +48,11 @@ char viesti[30] = "";
 // MPU power pin global variables
 static PIN_Handle hMpuPin;
 static PIN_State  MpuPinState;
+
+//Ledit
+static PIN_Handle ledHandle;
+static PIN_State ledState;
+
 
 // MPU power pin
 static PIN_Config MpuPinConfig[] = {
@@ -59,16 +66,23 @@ static const I2CCC26XX_I2CPinCfg i2cMPUCfg = {
     .pinSCL = Board_I2C0_SCL1
 };
 
-/*void buttonFxn(PIN_Handle handle, PIN_Id pinId) {
 
-    // JTKJ: Teht�v� 1. Vilkuta jompaa kumpaa ledi�
-    // JTKJ: Exercise 1. Blink either led of the device
+// Vakio Board_LED0 vastaa toista lediä
 
+PIN_Config ledConfig[] = {
+   Board_LED0 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+   PIN_TERMINATE // Asetustaulukko lopetetaan aina tällä vakiolla
+};
+
+void ledOn() {
 
     uint_t pinValue = PIN_getOutputValue( Board_LED0 );
-    pinValue = !pinValue;
-    PIN_setOutputValue( ledHandle, Board_LED0, pinValue );
-}*/
+    pinValue = 1;
+    PIN_setOutputValue( ledHandle, Board_LED0, pinValue);
+    Task_sleep(1000000 / Clock_tickPeriod);
+    pinValue = 0;
+    PIN_setOutputValue( ledHandle, Board_LED0, pinValue);
+}
 
 /* Task Functions */
 Void uartTaskFxn(UArg arg0, UArg arg1) {
@@ -102,9 +116,9 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
         // JTKJ: Exercise 3. Print out sensor data as string to debug window if the state is correct
         //       Remember to modify state
        if (programState == DATA_READY) {
-           sprintf(merkkijono,"%s\n", viesti);
-           System_printf(merkkijono);
-           UART_write(uart, merkkijono, strlen(merkkijono));
+           sprintf(merkkijono,"%s", viesti);
+           UART_write(uart, merkkijono, strlen(merkkijono)+1);
+           ledOn();
            programState = WAITING;
         }
         // JTKJ: Teht�v� 4. L�het� sama merkkijono UARTilla
@@ -173,10 +187,11 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
             //System_printf(merkkijono);
             if (acc_xyVector > 1 && az < 1){
                 strcpy(viesti, "id:3420,EAT:2");
+
                 programState = DATA_READY;
             }
-            if (az > 1 && ay < 1 && ax < 1){
-                strcpy(viesti, "id:3420,EXCERCISE:2");
+            if (fabs(az) > 1.5 && ay < 1 && ax < 1){
+                strcpy(viesti, "id:3420,EXERCISE:2");
                 programState = DATA_READY;
             }
             if (gx > 100 && gy < 100 && gz < 100){
@@ -231,7 +246,11 @@ Int main(void) {
         System_abort("Pin open failed!");
     }
 
-
+    // Ledi käyttöön ohjelmassa
+    ledHandle = PIN_open( &ledState, ledConfig );
+    if(!ledHandle) {
+       System_abort("Error initializing LED pin\n");
+    }
 
 
 
