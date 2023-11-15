@@ -41,7 +41,7 @@ enum state programState = WAITING;
 
 
 char viesti[30];
-
+int cmdNmbr;
 // JTKJ: Teht�v� 1. Lis�� painonappien RTOS-muuttujat ja alustus
 // JTKJ: Exercise 1. Add pins RTOS-variables and configuration here
 
@@ -73,6 +73,17 @@ PIN_Config ledConfig[] = {
    Board_LED0 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
    PIN_TERMINATE // Asetustaulukko lopetetaan aina tällä vakiolla
 };
+uint8_t uartBuffer[30]; // Vastaanottopuskuri
+
+// Käsittelijäfunktio
+static void uartFxn(UART_Handle handle, void *rxBuf, size_t len) {
+
+
+
+
+   // Käsittelijän viimeisenä asiana siirrytään odottamaan uutta keskeytystä..
+   UART_read(handle, rxBuf, 1);
+}
 
 void ledOn() {
 
@@ -97,8 +108,9 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
     UART_Params_init(&uartParams);
     uartParams.writeDataMode = UART_DATA_TEXT;
     uartParams.readDataMode = UART_DATA_TEXT;
-    uartParams.readEcho = UART_ECHO_OFF;
-    uartParams.readMode=UART_MODE_BLOCKING;
+    //uartParams.readEcho = UART_ECHO_OFF;
+    uartParams.readMode=UART_MODE_CALLBACK;
+    uartParams.readCallback  = &uartFxn; // Käsittelijäfunktio
     uartParams.baudRate = 9600; // nopeus 9600baud
     uartParams.dataLength = UART_LEN_8; // 8
     uartParams.parityType = UART_PAR_NONE; // n
@@ -109,6 +121,7 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
          System_abort("Error opening the UART");
       }
 
+      UART_read(uart, uartBuffer, 1);
     while (1) {
 
         // JTKJ: Teht�v� 3. Kun tila on oikea, tulosta sensoridata merkkijonossa debug-ikkunaan
@@ -121,6 +134,7 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
            ledOn();
            programState = WAITING;
         }
+
         // JTKJ: Teht�v� 4. L�het� sama merkkijono UARTilla
         // JTKJ: Exercise 4. Send the same sensor data string with UART
 
@@ -187,15 +201,17 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
             //System_printf(merkkijono);
             if (acc_xyVector > 1 && az < 1){
                 strcpy(viesti, "id:3420,EAT:2");
-
+                cmdNmbr = 1;
                 programState = DATA_READY;
             }
             if (fabs(az) > 1.5 && ay < 1 && ax < 1){
                 strcpy(viesti, "id:3420,EXERCISE:2");
+                cmdNmbr = 2;
                 programState = DATA_READY;
             }
             if (gx > 100 && gy < 100 && gz < 100){
                 strcpy(viesti, "id:3420,PET:2");
+                cmdNmbr = 3;
                 programState = DATA_READY;
             }
 
