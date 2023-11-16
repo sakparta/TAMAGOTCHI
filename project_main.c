@@ -73,16 +73,38 @@ PIN_Config ledConfig[] = {
    Board_LED0 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
    PIN_TERMINATE // Asetustaulukko lopetetaan aina tällä vakiolla
 };
-uint8_t uartBuffer[30]; // Vastaanottopuskuri
+char uartBuffer[80]; // Vastaanottopuskuri
 
 // Käsittelijäfunktio
 static void uartFxn(UART_Handle handle, void *rxBuf, size_t len) {
 
 
+   char id[5] = "";
+   //char haluttu [5] = "3420";
+
+   //System_printf(merkkijono);
+
+   int i=0;
+   while(i<4){
+       id[i] = uartBuffer[i];
+       i++;
+   }
+
+   if(strcmp(id,"3420") == 0){
+       System_printf(rxBuf);
+   }
+   //strncpy(id,rxBuf, 5);
+
+
+
+
+
+   //sprintf(merkkijono, "%s", id);
+   //System_printf(id);
 
 
    // Käsittelijän viimeisenä asiana siirrytään odottamaan uutta keskeytystä..
-   UART_read(handle, rxBuf, 1);
+   UART_read(handle, rxBuf, 80);
 }
 
 void ledOn() {
@@ -108,7 +130,7 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
     UART_Params_init(&uartParams);
     uartParams.writeDataMode = UART_DATA_TEXT;
     uartParams.readDataMode = UART_DATA_TEXT;
-    //uartParams.readEcho = UART_ECHO_OFF;
+    uartParams.readEcho = UART_ECHO_OFF;
     uartParams.readMode=UART_MODE_CALLBACK;
     uartParams.readCallback  = &uartFxn; // Käsittelijäfunktio
     uartParams.baudRate = 9600; // nopeus 9600baud
@@ -121,7 +143,7 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
          System_abort("Error opening the UART");
       }
 
-      UART_read(uart, uartBuffer, 1);
+    UART_read(uart, uartBuffer, 80);
     while (1) {
 
         // JTKJ: Teht�v� 3. Kun tila on oikea, tulosta sensoridata merkkijonossa debug-ikkunaan
