@@ -24,10 +24,11 @@
 
 /* Board Header files */
 #include "Board.h"
-#include "sensors/mpu9250.h"
 
-/* Board Header files */
+//sensors
+#include "sensors/mpu9250.h"
 #include "sensors/buzzer.h"
+#include "sensors/opt3001.h"
 
 /* Task */
 #define STACKSIZE 2048
@@ -37,6 +38,8 @@ Char buzzerTaskStack[STACKSIZE];
 
 static PIN_Handle hBuzzer;
 static PIN_State sBuzzer;
+
+//buzzer config
 PIN_Config cBuzzer[] = {
   Board_BUZZER | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
   PIN_TERMINATE
@@ -54,17 +57,35 @@ char viesti[30];
 //messages
 char message[30];
 
-// JTKJ: Teht�v� 1. Lis�� painonappien RTOS-muuttujat ja alustus
-// JTKJ: Exercise 1. Add pins RTOS-variables and configuration here
+//Buzzer sound
+int sound = 0;
+
+
 
 // MPU power pin global variables
 static PIN_Handle hMpuPin;
 static PIN_State  MpuPinState;
 
+//napit
+static PIN_Handle buttonHandle;
+static PIN_State buttonState;
+
 //Ledit
 static PIN_Handle ledHandle;
 static PIN_State ledState;
 
+
+// Vakio BOARD_BUTTON_0 vastaa toista painonappia
+PIN_Config buttonConfig[] = {
+   Board_BUTTON0  | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
+   PIN_TERMINATE // Asetustaulukko lopetetaan aina tällä vakiolla
+};
+
+//punainen ledi
+PIN_Config ledConfigRed[] = {
+   Board_LED1 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+   PIN_TERMINATE
+};
 
 // MPU power pin
 static PIN_Config MpuPinConfig[] = {
@@ -85,6 +106,7 @@ PIN_Config ledConfig[] = {
    Board_LED0 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
    PIN_TERMINATE // Asetustaulukko lopetetaan aina tällä vakiolla
 };
+
 char uartBuffer[80]; // Vastaanottopuskuri
 
 // Käsittelijäfunktio
@@ -94,9 +116,8 @@ static void uartFxn(UART_Handle handle, void *rxBuf, size_t len) {
    char id[5] = "";
 
    int checker = 0;
-
-
    int i=0;
+   //haetaan 4 ensinmäistä merkkiä (id)
    while(i<4){
        id[i] = uartBuffer[i];
        i++;
@@ -104,7 +125,13 @@ static void uartFxn(UART_Handle handle, void *rxBuf, size_t len) {
    //Katsotaan, että tamakotchin joku arvo menee alle 2
    if(strstr(rxBuf, "food") || strstr(rxBuf, "scratch") || strstr(rxBuf, "wellbeing")){
        checker = 1;
+       sound = 1;
    }
+   //jos lemmikki karkaa soitetaan mario
+   if(strstr(rxBuf, "Too late")){
+          checker = 1;
+          sound = 2;
+      }
    //jos id on 3420 ja tamakotchin joku arvo on alle 2 niin laitetaan tilakoneen arvo buzzer
    if(strcmp(id,"3420") == 0 && checker == 1){
        programState = BUZZER;
@@ -117,7 +144,7 @@ static void uartFxn(UART_Handle handle, void *rxBuf, size_t len) {
 }
 
 void ledOn() {
-
+    //vaihdetaan vihreä ledit vähäksi aikaan päälle
     uint_t pinValue = PIN_getOutputValue( Board_LED0 );
     pinValue = 1;
     PIN_setOutputValue( ledHandle, Board_LED0, pinValue);
@@ -125,6 +152,24 @@ void ledOn() {
     pinValue = 0;
     PIN_setOutputValue( ledHandle, Board_LED0, pinValue);
 }
+
+// Napinpainalluksen keskeytyksen käsittelijäfunktio
+void buttonFxn(PIN_Handle handle, PIN_Id pinId) {
+   if(programState == WAITING){
+       // Vaihdetaan led-pinnin tila päälle
+       uint_t pinValue = PIN_getOutputValue( Board_LED1 );
+       pinValue = 1;
+       PIN_setOutputValue( ledHandle, Board_LED1, pinValue );
+       programState = MENU;
+   }else if(programState == MENU){
+        // Vaihdetaan led-pinni pois päältä
+        uint_t pinValue = PIN_getOutputValue( Board_LED1 );
+        pinValue = 0;
+        PIN_setOutputValue( ledHandle, Board_LED1, pinValue );
+        programState = WAITING;
+    }
+}
+
 
 /* Task Functions */
 Void uartTaskFxn(UArg arg0, UArg arg1) {
@@ -155,10 +200,7 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
     UART_read(uart, uartBuffer, 80);
     while (1) {
 
-        // JTKJ: Teht�v� 3. Kun tila on oikea, tulosta sensoridata merkkijonossa debug-ikkunaan
-        //       Muista tilamuutos
-        // JTKJ: Exercise 3. Print out sensor data as string to debug window if the state is correct
-        //       Remember to modify state
+        // Kun tila on oikea, lähetetään viesti backendille ja laitetaan ledi päälle
        if (programState == DATA_READY) {
            sprintf(merkkijono,"%s", viesti);
            UART_write(uart, merkkijono, strlen(merkkijono)+1);
@@ -167,12 +209,6 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
            ledOn();
            programState = WAITING;
         }
-
-        // JTKJ: Teht�v� 4. L�het� sama merkkijono UARTilla
-        // JTKJ: Exercise 4. Send the same sensor data string with UART
-
-
-
 
         // Once per second, you can modify this
         Task_sleep(1000000 / Clock_tickPeriod);
@@ -183,9 +219,16 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
 
     float ax, ay, az, gx, gy, gz;
 
+
+
     I2C_Handle i2cMPU; // Own i2c-interface for MPU9250 sensor
     I2C_Params i2cMPUParams;
 
+
+
+
+
+    //mpu9250
     I2C_Params_init(&i2cMPUParams);
     i2cMPUParams.bitRate = I2C_400kHz;
     // Note the different configuration below
@@ -210,27 +253,21 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
 
     mpu9250_setup(&i2cMPU);
 
+
     System_printf("MPU9250: Setup and calibration OK\n");
     System_flush();
 
     while (1) {
 
-        // JTKJ: Teht�v� 2. Lue sensorilta dataa ja tulosta se Debug-ikkunaan merkkijonona
-        // JTKJ: Exercise 2. Read sensor data and print it to the Debug window as string
 
-       /* double valoisuus = opt3001_get_data(&i2c);
-
-        sprintf(merkkijono,"%f\n",valoisuus);
-        System_printf(merkkijono);*/
-
-
-        // JTKJ: Teht�v� 3. Tallenna mittausarvo globaaliin muuttujaan
-        //       Muista tilamuutos
         if(programState == WAITING){
+
+
             mpu9250_get_data(&i2cMPU, &ax, &ay, &az, &gx, &gy, &gz);
             float acc_xyVector = sqrt(ax * ax + ay * ay);
-            //sprintf(merkkijono,"%f\n", acc_xyVector);
-            //System_printf(merkkijono);
+
+
+            //check if sensortag is moving
             if (acc_xyVector > 1 && az < 1){
                 strcpy(viesti, "id:3420,EAT:2");
                 strcpy(message, "id:3420,MSG1:Hyvaa!,MSG2:Food level + 2");
@@ -248,22 +285,17 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
             }
         }
 
-        // JTKJ: Exercise 3. Save the sensor value into the global variable
-        //       Remember to modify state
-
-        // Just for sanity check for exercise, you can comment this out
-
-
 
         // Once per second, you can modify this
         Task_sleep(1000000 / Clock_tickPeriod);
     }
 
 }
+//buzzer sounds
 Void buzzerTaskFxn(UArg arg0, UArg arg1){
     while(1){
-        if(programState == BUZZER){
-
+        if(programState == BUZZER && sound == 1){
+            //Nokia tune
             buzzerOpen(hBuzzer);
             buzzerSetFrequency(2637); //E
             Task_sleep(333333 / Clock_tickPeriod); //eight note
@@ -293,6 +325,33 @@ Void buzzerTaskFxn(UArg arg0, UArg arg1){
             Task_sleep(666667 / Clock_tickPeriod); //half note
             buzzerClose();
             programState = WAITING;
+        }else if(programState == BUZZER && sound == 2){
+            //pirkka mario death sound
+            buzzerOpen(hBuzzer);
+            buzzerSetFrequency(1975); //B
+            Task_sleep(150000 / Clock_tickPeriod); //16th note
+            buzzerSetFrequency(2794); //F
+            Task_sleep(75000 / Clock_tickPeriod); //32th note
+            buzzerSetFrequency(0); //break
+            Task_sleep(150000 / Clock_tickPeriod); //16th note
+            buzzerSetFrequency(2794); //F
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(2637); //E
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(2350); //D
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(2093); //C
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1318); //E
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(0); //break
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1318); //E
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1046); //C
+            Task_sleep(666666 / Clock_tickPeriod); //quarter note
+            buzzerClose();
+            programState = WAITING;
         }
         Task_sleep(1000000 / Clock_tickPeriod);
     }
@@ -312,21 +371,12 @@ Int main(void) {
     // Initialize board
     Board_initGeneral();
 
-
-
-
-    // JTKJ: Teht�v� 2. Ota i2c-v�yl� k�ytt��n ohjelmassa
-    // JTKJ: Exercise 2. Initialize i2c bus
-
+    //Initialize i2c bus
     Board_initI2C();
 
-    // JTKJ: Teht�v� 4. Ota UART k�ytt��n ohjelmassa
-    // JTKJ: Exercise 4. Initialize UART
+
+    // Initialize UART
     Board_initUART();
-    // JTKJ: Teht�v� 1. Ota painonappi ja ledi ohjelman k�ytt��n
-    //       Muista rekister�id� keskeytyksen k�sittelij� painonapille
-    // JTKJ: Exercise 1. Open the button and led pins
-    //       Remember to register the above interrupt handler for button
 
     // Open MPU power pin
     hMpuPin = PIN_open(&MpuPinState, MpuPinConfig);
@@ -344,6 +394,22 @@ Int main(void) {
     if (hBuzzer == NULL) {
         System_abort("Pin open failed!");
    }
+   //nappi käyttöön ohjelmassa
+    buttonHandle = PIN_open(&buttonState, buttonConfig);
+     if(!buttonHandle) {
+        System_abort("Error initializing button pins\n");
+     }
+     //punainen ledi käyttöön
+     ledHandle = PIN_open(&ledState, ledConfigRed);
+     if(!ledHandle) {
+        System_abort("Error initializing LED pins\n");
+      }
+
+      // Asetetaan painonappi-pinnille keskeytyksen käsittelijäksi
+      // funktio buttonFxn
+      if (PIN_registerIntCb(buttonHandle, &buttonFxn) != 0) {
+         System_abort("Error registering button callback function");
+      }
 
 
     /* Task */
