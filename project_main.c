@@ -26,22 +26,34 @@
 #include "Board.h"
 #include "sensors/mpu9250.h"
 
+/* Board Header files */
+#include "sensors/buzzer.h"
+
 /* Task */
 #define STACKSIZE 2048
 Char sensorTaskStack[STACKSIZE];
 Char uartTaskStack[STACKSIZE];
+Char buzzerTaskStack[STACKSIZE];
 
-// JTKJ: Teht�v� 3. Tilakoneen esittely
-// JTKJ: Exercise 3. Definition of the state machine
-enum state { WAITING=1, DATA_READY };
+static PIN_Handle hBuzzer;
+static PIN_State sBuzzer;
+PIN_Config cBuzzer[] = {
+  Board_BUZZER | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+  PIN_TERMINATE
+};
+
+
+// Tilakoneen esittely
+
+enum state { WAITING=1, DATA_READY, BUZZER, MENU};
 enum state programState = WAITING;
 
-// JTKJ: Teht�v� 3. Valoisuuden globaali muuttuja
-// JTKJ: Exercise 3. Global variable for ambient light
 
-
+//viesti
 char viesti[30];
-int cmdNmbr;
+//messages
+char message[30];
+
 // JTKJ: Teht�v� 1. Lis�� painonappien RTOS-muuttujat ja alustus
 // JTKJ: Exercise 1. Add pins RTOS-variables and configuration here
 
@@ -80,27 +92,24 @@ static void uartFxn(UART_Handle handle, void *rxBuf, size_t len) {
 
 
    char id[5] = "";
-   //char haluttu [5] = "3420";
 
-   //System_printf(merkkijono);
+   int checker = 0;
+
 
    int i=0;
    while(i<4){
        id[i] = uartBuffer[i];
        i++;
    }
-
-   if(strcmp(id,"3420") == 0){
-       System_printf(rxBuf);
+   //Katsotaan, että tamakotchin joku arvo menee alle 2
+   if(strstr(rxBuf, "food") || strstr(rxBuf, "scratch") || strstr(rxBuf, "wellbeing")){
+       checker = 1;
    }
-   //strncpy(id,rxBuf, 5);
+   //jos id on 3420 ja tamakotchin joku arvo on alle 2 niin laitetaan tilakoneen arvo buzzer
+   if(strcmp(id,"3420") == 0 && checker == 1){
+       programState = BUZZER;
+   }
 
-
-
-
-
-   //sprintf(merkkijono, "%s", id);
-   //System_printf(id);
 
 
    // Käsittelijän viimeisenä asiana siirrytään odottamaan uutta keskeytystä..
@@ -122,8 +131,8 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
 
     char merkkijono[30];
 
-    // JTKJ: Teht�v� 4. Lis�� UARTin alustus: 9600,8n1
-    // JTKJ: Exercise 4. Setup here UART connection as 9600,8n1
+    //UARTin alustus: 9600,8n1
+
     UART_Handle uart;
     UART_Params uartParams;
 
@@ -153,6 +162,8 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
        if (programState == DATA_READY) {
            sprintf(merkkijono,"%s", viesti);
            UART_write(uart, merkkijono, strlen(merkkijono)+1);
+           sprintf(merkkijono,"%s", message);
+           UART_write(uart, merkkijono, strlen(merkkijono)+1);
            ledOn();
            programState = WAITING;
         }
@@ -160,7 +171,7 @@ Void uartTaskFxn(UArg arg0, UArg arg1) {
         // JTKJ: Teht�v� 4. L�het� sama merkkijono UARTilla
         // JTKJ: Exercise 4. Send the same sensor data string with UART
 
-        // Just for sanity check for exercise, you can comment this out
+
 
 
         // Once per second, you can modify this
@@ -174,7 +185,7 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
 
     I2C_Handle i2cMPU; // Own i2c-interface for MPU9250 sensor
     I2C_Params i2cMPUParams;
-    char merkkijono[30];
+
     I2C_Params_init(&i2cMPUParams);
     i2cMPUParams.bitRate = I2C_400kHz;
     // Note the different configuration below
@@ -217,26 +228,24 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
         //       Muista tilamuutos
         if(programState == WAITING){
             mpu9250_get_data(&i2cMPU, &ax, &ay, &az, &gx, &gy, &gz);
-
             float acc_xyVector = sqrt(ax * ax + ay * ay);
             //sprintf(merkkijono,"%f\n", acc_xyVector);
             //System_printf(merkkijono);
             if (acc_xyVector > 1 && az < 1){
                 strcpy(viesti, "id:3420,EAT:2");
-                cmdNmbr = 1;
+                strcpy(message, "id:3420,MSG1:Hyvaa!,MSG2:Food level + 2");
                 programState = DATA_READY;
             }
             if (fabs(az) > 1.5 && ay < 1 && ax < 1){
                 strcpy(viesti, "id:3420,EXERCISE:2");
-                cmdNmbr = 2;
+                strcpy(message, "id:3420,MSG1:Terveellista,MSG2:Fitness level + 2");
                 programState = DATA_READY;
             }
             if (gx > 100 && gy < 100 && gz < 100){
                 strcpy(viesti, "id:3420,PET:2");
-                cmdNmbr = 3;
+                strcpy(message, "id:3420,MSG1:Naurattaahan se!,MSG2:Happiness level + 2");
                 programState = DATA_READY;
             }
-
         }
 
         // JTKJ: Exercise 3. Save the sensor value into the global variable
@@ -251,6 +260,44 @@ Void sensorTaskFxn(UArg arg0, UArg arg1) {
     }
 
 }
+Void buzzerTaskFxn(UArg arg0, UArg arg1){
+    while(1){
+        if(programState == BUZZER){
+
+            buzzerOpen(hBuzzer);
+            buzzerSetFrequency(2637); //E
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(2350); //D
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1480); //F#
+            Task_sleep(166667 / Clock_tickPeriod); //quarter note
+            buzzerSetFrequency(1661); //G#
+            Task_sleep(166667 / Clock_tickPeriod); //quarter note
+            buzzerSetFrequency(2217); //C#
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1975); //B
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1175); //D
+            Task_sleep(166667 / Clock_tickPeriod); //quarter note
+            buzzerSetFrequency(1318); //E
+            Task_sleep(166667 / Clock_tickPeriod); //quarter note
+            buzzerSetFrequency(1975); //B
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1760); //A
+            Task_sleep(333333 / Clock_tickPeriod); //eight note
+            buzzerSetFrequency(1108); //C#
+            Task_sleep(166667 / Clock_tickPeriod); //quarter note
+            buzzerSetFrequency(1318); //E
+            Task_sleep(166667 / Clock_tickPeriod); //quarter note
+            buzzerSetFrequency(1760); //A
+            Task_sleep(666667 / Clock_tickPeriod); //half note
+            buzzerClose();
+            programState = WAITING;
+        }
+        Task_sleep(1000000 / Clock_tickPeriod);
+    }
+}
+
 
 Int main(void) {
 
@@ -259,9 +306,12 @@ Int main(void) {
     Task_Params sensorTaskParams;
     Task_Handle uartTaskHandle;
     Task_Params uartTaskParams;
+    Task_Handle buzzerTaskHandle;
+    Task_Params buzzerTaskParams;
 
     // Initialize board
     Board_initGeneral();
+
 
 
 
@@ -289,7 +339,11 @@ Int main(void) {
     if(!ledHandle) {
        System_abort("Error initializing LED pin\n");
     }
-
+    // Buzzer
+    hBuzzer = PIN_open(&sBuzzer, cBuzzer);
+    if (hBuzzer == NULL) {
+        System_abort("Pin open failed!");
+   }
 
 
     /* Task */
@@ -310,6 +364,14 @@ Int main(void) {
     if (uartTaskHandle == NULL) {
         System_abort("Task create failed!");
     }
+    Task_Params_init(&buzzerTaskParams);
+    buzzerTaskParams.stackSize = STACKSIZE;
+    buzzerTaskParams.stack = &buzzerTaskStack;
+    buzzerTaskParams.priority=2;
+    buzzerTaskHandle = Task_create(buzzerTaskFxn, &buzzerTaskParams, NULL);
+       if (buzzerTaskHandle == NULL) {
+           System_abort("Task create failed!");
+       }
 
     /* Sanity check */
     System_printf("Hello world!\n");
